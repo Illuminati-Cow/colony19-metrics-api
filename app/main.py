@@ -35,13 +35,23 @@ def create_session(sessionRequest: NewSessionRequest, db: Database = Depends(get
 
 @app.put("/metrics/{session_id}")
 def update_session_metrics(session_id: str, metrics: SessionMetrics, db: Database = Depends(get_db)):
+    # Separate FPS from other metrics
+    update_fields = metrics.model_dump(mode="json")
+    fps_data = update_fields.pop("fps", None)
+    # Update all fields except fps
     result = db.sessions.update_one(
         {"_id": session_id},
-        {"$set": metrics.model_dump(mode="json")},
+        {"$set": update_fields}
     )
+    # If fps is present, append it to the array
+    if fps_data is not None and len(fps_data) > 0:
+        db.sessions.update_one(
+            {"_id": session_id},
+            {"$push": {"fps": {"$each": fps_data}}}
+        )
     if result.matched_count == 0:
         return {"error": "Session not found"}
-    return {"status": "ok"}
+    return {"status": "ok", "fps_count": len(fps_data) if fps_data else 0}
 
 @app.get("/metrics")
 async def get_metrics(db: Database = Depends(get_db)):

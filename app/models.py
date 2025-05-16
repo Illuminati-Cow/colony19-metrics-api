@@ -1,7 +1,7 @@
 from collections import namedtuple
 from datetime import datetime
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 
 class DeathEvent(BaseModel):
     time: float
@@ -13,7 +13,7 @@ class Event(BaseModel):
 
 class SessionMetrics(BaseModel):
     start_time: datetime
-    end_time: datetime
+    end_time: Optional[datetime] = None
     achievements_earned: List[Event]
     progress_times: List[Event]
     fps: list[int]
