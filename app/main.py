@@ -33,6 +33,16 @@ def create_session(sessionRequest: NewSessionRequest, db: Database = Depends(get
     })
     return NewSessionResponse(session_id=session_id)
 
+@app.put("/metrics/{session_id}")
+def update_session_metrics(session_id: str, metrics: SessionMetrics, db: Database = Depends(get_db)):
+    result = db.sessions.update_one(
+        {"_id": session_id},
+        {"$set": metrics.model_dump(mode="json")},
+    )
+    if result.matched_count == 0:
+        return {"error": "Session not found"}
+    return {"status": "ok"}
+
 @app.get("/metrics")
 async def get_metrics(db: Database = Depends(get_db)):
     sessions = list(db.sessions.find({}, {"_id": 0}))

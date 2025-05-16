@@ -1,15 +1,24 @@
+from collections import namedtuple
 from datetime import datetime
 from pydantic import BaseModel
-from typing import Generator
+from typing import List
+
+class DeathEvent(BaseModel):
+    time: float
+    position: List[float]
+
+class Event(BaseModel):
+    name: str
+    time: float
 
 class SessionMetrics(BaseModel):
     start_time: datetime
     end_time: datetime
-    achievements_earned: dict[str, float]
-    progress_times: dict[str, float]
+    achievements_earned: List[Event]
+    progress_times: List[Event]
     fps: list[int]
-    terminals_scanned: dict[str, float]
-    deaths: tuple[float, list[float]]
+    terminals_scanned: List[Event]
+    deaths: List[DeathEvent]
 
 class NewSessionRequest(BaseModel):
     app_name: str
