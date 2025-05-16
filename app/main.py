@@ -6,7 +6,7 @@ from typing import Generator
 import uuid
 from models import *
 
-DB_URI = "mongodb://localhost:27017"
+DB_URI = "mongodb://mongodb:27017"
 DB_NAME = "metrics"
 
 app = FastAPI()
