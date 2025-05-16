@@ -1,56 +1,40 @@
 from datetime import datetime
-from unittest import result
-from fastapi import FastAPI
-from flask import session
-from pydantic import BaseModel
+from fastapi import FastAPI, Depends
 from pymongo import MongoClient
-import os
+from pymongo.database import Database
+from typing import Generator
+import uuid
+from models import *
 
-DB_URI = "mongodb://mongodb:27017"
+DB_URI = "mongodb://localhost:27017"
 DB_NAME = "metrics"
 
 app = FastAPI()
 
-# Initialize MongoDB client
-client = MongoClient(DB_URI)
-db = client[DB_NAME]
+def get_db() -> Generator[Database, None, None]:
+    client = MongoClient(DB_URI)
+    db = client[DB_NAME]
+    try:
+        yield db
+    finally:
+        client.close()
 
-# Ensure collections exist
-db.sessions.create_index("session_id", unique=True)
-
-class SessionData(BaseModel):
-    session_id: str
-    app_name: str
-    device: str
-    os: str
-    fps: list[int]
-
-
-    
-
-@app.post("/metrics/new_session")
-def create_session(app_name: str):
-    session_id = str(datetime.now())
+@app.post("/metrics/new_session", response_model=NewSessionResponse)
+def create_session(sessionRequest: NewSessionRequest, db: Database = Depends(get_db)):
+    session_id = str(uuid.uuid4())
     db.sessions.insert_one({
-        "session_id": session_id,
-        "app_name": app_name,
+        "_id": session_id,
+        "app_name": sessionRequest.app_name,
+        "app_version": sessionRequest.app_version,
+        "device_id": sessionRequest.device_id,
+        "device_type": sessionRequest.device_type,
+        "device_model": sessionRequest.device_model,
+        "os": sessionRequest.os,
     })
-    return {"status": "ok", "session_id": session_id}
-
-# @app.put("/metrics/{session_id}")
-# def update_data(session: SessionData):
-#     db.sessions.update_one(
-#         {"session_id": session.session_id},
-#         {"$set": {
-            
-#         upsert=True
-#     )
-#     return {"status": "ok"}
-
-
+    return NewSessionResponse(session_id=session_id)
 
 @app.get("/metrics")
-async def get_metrics():
+async def get_metrics(db: Database = Depends(get_db)):
     sessions = list(db.sessions.find({}, {"_id": 0}))
     return {"metrics": sessions}
 
@@ -59,5 +43,9 @@ async def root():
     return {"message": "Welcome to the Metrics Collector API!"}
 
 @app.get("/health")
-async def healthcheck():
-    return {"status": "ok"}
+async def healthcheck(db: Database = Depends(get_db)):
+    try:
+        db.command('ping')
+        return {"status": "ok"}
+    except Exception:
+        return {"status": "error"}
