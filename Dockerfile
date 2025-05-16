@@ -3,7 +3,7 @@ FROM python:3.11-slim
 WORKDIR /app
 COPY app /app
 
-RUN pip install fastapi uvicorn
+RUN pip install fastapi uvicorn pymongo
 
 ENV PORT=8000
 
