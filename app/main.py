@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 from fastapi import FastAPI, Depends
 from pymongo import MongoClient
@@ -6,8 +7,14 @@ from typing import Generator
 import uuid
 from models import *
 
-DB_URI = "mongodb://mongodb:27017"
-DB_NAME = "metrics"
+DB_USER = os.environ.get("MONGO_INITDB_ROOT_USERNAME", "root")
+DB_PASS = os.environ.get("MONGO_INITDB_ROOT_PASSWORD", "password")
+DB_HOST = os.environ.get("MONGO_HOST", "mongodb")
+DB_NAME = os.environ.get("MONGO_INITDB_DATABASE", "metrics")
+DB_PORT = os.environ.get("MONGO_PORT", "27017")
+
+
+DB_URI = f"mongodb://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}?authSource=admin"
 
 app = FastAPI()
 
