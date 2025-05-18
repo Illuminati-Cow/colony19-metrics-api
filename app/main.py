@@ -40,41 +40,44 @@ def create_session(sessionRequest: NewSessionRequest, db: Database = Depends(get
     })
     return NewSessionResponse(session_id=session_id)
 
-@app.put("/metrics/{session_id}")
+@app.put("/metrics/{session_id}", response_model=UpdateSessionResponse)
 def update_session_metrics(session_id: str, metrics: SessionMetrics, db: Database = Depends(get_db)):
     # Fetch device_id from session document
     session_doc = db.sessions.find_one({"_id": session_id})
     device_id = session_doc.get("device_id") if session_doc else None
 
-    # Prepare events and deaths for insertion
-    event_fields = {
-        'achievements_earned': 'achievement',
-        'progress_times': 'progress',
-        'terminals_scanned': 'terminal',
-    }
-    def prepare_inserts(field_map, data, extra_fields=None):
+    def prepare_inserts(*items: EventRequest | DeathEventRequest):
         to_insert, query = [], []
-        for field, type_val in field_map.items():
-            items = getattr(data, field, [])
-            for item in items:
-                q = {'session_id': session_id, 'type': type_val, 'name': getattr(item, 'name', None)}
-                if extra_fields and 'time' in extra_fields:
-                    q['time'] = getattr(item, 'time', None)
-                query.append(q)
-                doc = {
-                    'session_id': session_id,
-                    'device_id': device_id,
-                    'type': type_val,
-                    'name': getattr(item, 'name', None),
-                    'time': getattr(item, 'time', None)
-                }
-                if extra_fields:
-                    doc.update({k: getattr(item, k, None) for k in extra_fields if k not in doc})
-                to_insert.append(doc)
+        # Ensure device_id is always a string for document creation
+        doc_device_id = device_id if device_id is not None else ""
+        for item in items:
+            if isinstance(item, EventRequest):
+                doc = EventDoc(
+                    session_id=session_id,
+                    device_id=doc_device_id,
+                    type=item.type,
+                    name=item.name,
+                    time=item.time
+                ).model_dump()
+                q = {'session_id': session_id, 'type': item.type, 'name': item.name}
+            elif isinstance(item, DeathEventRequest):
+                doc = DeathEventDoc(
+                    session_id=session_id,
+                    device_id=doc_device_id,
+                    time=item.time,
+                    position=item.position
+                ).model_dump()
+                q = {'session_id': session_id, 'time': item.time}
+            else:
+                continue
+            query.append(q)
+            to_insert.append(doc)
         return to_insert, query
 
+    if db.sessions.count_documents({"_id": session_id}) == 0:
+        return {"error": "Session not found"}
     # Handle events
-    events_to_insert, event_query = prepare_inserts(event_fields, metrics)
+    events_to_insert, event_query = prepare_inserts(*metrics.achievements_earned, *metrics.progress_times, *metrics.terminals_scanned)
     existing_events = set()
     if event_query:
         existing = db.events.find({'$or': event_query}, {'type': 1, 'name': 1, '_id': 0})
@@ -85,14 +88,13 @@ def update_session_metrics(session_id: str, metrics: SessionMetrics, db: Databas
         db.events.insert_many(filtered_events)
 
     # Handle deaths
-    death_fields = {'deaths': 'death'}
-    deaths_to_insert, death_query = prepare_inserts(death_fields, metrics, extra_fields=['position'])
+    deaths_to_insert, death_query = prepare_inserts(*metrics.deaths)
     existing_deaths = set()
     if death_query:
-        existing = db.deaths.find({'$or': death_query}, {'type': 1, 'time': 1, '_id': 0})
+        existing = db.deaths.find({'$or': death_query}, {'time': 1, '_id': 0})
         for d in existing:
-            existing_deaths.add((d['type'], d['time']))
-    filtered_deaths = [d for d in deaths_to_insert if (d['type'], d['time']) not in existing_deaths]
+            existing_deaths.add(d['time'])
+    filtered_deaths = [d for d in deaths_to_insert if d['time'] not in existing_deaths]
     if filtered_deaths:
         db.deaths.insert_many(filtered_deaths)
 
@@ -120,28 +122,26 @@ def update_session_metrics(session_id: str, metrics: SessionMetrics, db: Databas
         ]
         db.fps_data.insert_many(fps_docs)
 
-    if result.matched_count == 0:
-        return {"error": "Session not found"}
-    return {
-        "status": "ok",
-        "fps_count": len(metrics.fps) if metrics.fps else 0,
-        "events_count": len(filtered_events),
-        "deaths_count": len(filtered_deaths)
-    }
+    return UpdateSessionResponse(
+        status="ok",
+        fps_count=len(metrics.fps) if metrics.fps else 0,
+        events_count=len(filtered_events),
+        deaths_count=len(filtered_deaths)
+    )
 
-@app.get("/metrics")
+@app.get("/metrics", response_model=GetMetricsResponse)
 async def get_metrics(db: Database = Depends(get_db)):
     sessions = list(db.sessions.find({}, {"_id": 0}))
-    return {"metrics": sessions}
+    return GetMetricsResponse(metrics=sessions)
 
-@app.get("/")
+@app.get("/", response_model=RootResponse)
 async def root():
-    return {"message": "Welcome to the Metrics Collector API!"}
+    return RootResponse(message="Welcome to the Metrics Collector API!")
 
-@app.get("/health")
+@app.get("/health", response_model=HealthCheckResponse)
 async def healthcheck(db: Database = Depends(get_db)):
     try:
         db.command('ping')
-        return {"status": "ok"}
+        return HealthCheckResponse(status="ok")
     except Exception:
-        return {"status": "error"}
+        return HealthCheckResponse(status="error")

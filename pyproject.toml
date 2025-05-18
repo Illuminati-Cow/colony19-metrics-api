@@ -1,0 +1,10 @@
+[project]
+name = "colony19-metrics-api"
+version = "0.1.0"
+description = "Colony19 Metrics API"
+requires-python = ">=3.10"
+
+[project.dependencies]
+fastapi = "*"
+uvicorn = "*"
+pymongo = "*"

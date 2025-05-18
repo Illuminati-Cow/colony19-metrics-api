@@ -1,8 +1,12 @@
 FROM python:3.11-slim
 
 WORKDIR /app
+
+# Copy pyproject.toml and install dependencies first
+COPY pyproject.toml .
+RUN pip install --no-cache-dir 'fastapi' 'uvicorn' 'pymongo'
+
+# Now copy your app code
 COPY app /app
 
-RUN pip install fastapi uvicorn pymongo
-
-CMD sh -c "uvicorn main:app --host 0.0.0.0"
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0"]
