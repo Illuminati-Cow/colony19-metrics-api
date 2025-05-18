@@ -8,6 +8,7 @@ class DeathEvent(BaseModel):
     position: List[float]
 
 class Event(BaseModel):
+    type: str
     name: str
     time: float
 
@@ -30,3 +31,9 @@ class NewSessionRequest(BaseModel):
 
 class NewSessionResponse(BaseModel):
     session_id: str
+
+class FpsSample(BaseModel):
+    session_id: str
+    device_id: str
+    time: datetime
+    fps: int

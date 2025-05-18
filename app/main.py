@@ -42,23 +42,92 @@ def create_session(sessionRequest: NewSessionRequest, db: Database = Depends(get
 
 @app.put("/metrics/{session_id}")
 def update_session_metrics(session_id: str, metrics: SessionMetrics, db: Database = Depends(get_db)):
-    # Separate FPS from other metrics
-    update_fields = metrics.model_dump(mode="json")
-    fps_data = update_fields.pop("fps", None)
-    # Update all fields except fps
+    # Fetch device_id from session document
+    session_doc = db.sessions.find_one({"_id": session_id})
+    device_id = session_doc.get("device_id") if session_doc else None
+
+    # Prepare events and deaths for insertion
+    event_fields = {
+        'achievements_earned': 'achievement',
+        'progress_times': 'progress',
+        'terminals_scanned': 'terminal',
+    }
+    def prepare_inserts(field_map, data, extra_fields=None):
+        to_insert, query = [], []
+        for field, type_val in field_map.items():
+            items = getattr(data, field, [])
+            for item in items:
+                q = {'session_id': session_id, 'type': type_val, 'name': getattr(item, 'name', None)}
+                if extra_fields and 'time' in extra_fields:
+                    q['time'] = getattr(item, 'time', None)
+                query.append(q)
+                doc = {
+                    'session_id': session_id,
+                    'device_id': device_id,
+                    'type': type_val,
+                    'name': getattr(item, 'name', None),
+                    'time': getattr(item, 'time', None)
+                }
+                if extra_fields:
+                    doc.update({k: getattr(item, k, None) for k in extra_fields if k not in doc})
+                to_insert.append(doc)
+        return to_insert, query
+
+    # Handle events
+    events_to_insert, event_query = prepare_inserts(event_fields, metrics)
+    existing_events = set()
+    if event_query:
+        existing = db.events.find({'$or': event_query}, {'type': 1, 'name': 1, '_id': 0})
+        for ev in existing:
+            existing_events.add((ev['type'], ev['name']))
+    filtered_events = [e for e in events_to_insert if (e['type'], e['name']) not in existing_events]
+    if filtered_events:
+        db.events.insert_many(filtered_events)
+
+    # Handle deaths
+    death_fields = {'deaths': 'death'}
+    deaths_to_insert, death_query = prepare_inserts(death_fields, metrics, extra_fields=['position'])
+    existing_deaths = set()
+    if death_query:
+        existing = db.deaths.find({'$or': death_query}, {'type': 1, 'time': 1, '_id': 0})
+        for d in existing:
+            existing_deaths.add((d['type'], d['time']))
+    filtered_deaths = [d for d in deaths_to_insert if (d['type'], d['time']) not in existing_deaths]
+    if filtered_deaths:
+        db.deaths.insert_many(filtered_deaths)
+
+    # Update start_time and end_time only
+    update_fields = {}
+    if metrics.start_time:
+        update_fields['start_time'] = metrics.start_time
+    if metrics.end_time:
+        update_fields['end_time'] = metrics.end_time
     result = db.sessions.update_one(
         {"_id": session_id},
         {"$set": update_fields}
     )
-    # If fps is present, append it to the array
-    if fps_data is not None and len(fps_data) > 0:
-        db.sessions.update_one(
-            {"_id": session_id},
-            {"$push": {"fps": {"$each": fps_data}}}
-        )
+
+    # Insert FPS samples
+    if metrics.fps and len(metrics.fps) > 0:
+        fps_docs = [
+            {
+                "session_id": session_id,
+                "device_id": device_id,
+                "time": datetime.now(),
+                "fps": fps
+            }
+            for fps in metrics.fps
+        ]
+        db.fps_data.insert_many(fps_docs)
+
     if result.matched_count == 0:
         return {"error": "Session not found"}
-    return {"status": "ok", "fps_count": len(fps_data) if fps_data else 0}
+    return {
+        "status": "ok",
+        "fps_count": len(metrics.fps) if metrics.fps else 0,
+        "events_count": len(filtered_events),
+        "deaths_count": len(filtered_deaths)
+    }
 
 @app.get("/metrics")
 async def get_metrics(db: Database = Depends(get_db)):
